@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatBot from KP</title>
+    <style>
+        :root{
+            --bg-color: #f7f7f8;
+            --chat-bg: #ffffff;
+            --user-bubble: #10a37f;
+            --bot-bubble: #f1f1f4;
+            --text-dark: #2d3748;
+            --border-color: #e2e8f0;
+        }
+        *{box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;}
+        body{
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-dark);
+        }
+        .sidebar{
+            width: 260px;
+            background: #202123;
+            color: #ffffff;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .sidebar h2{font-size: 1.1rem;}
+        .sidebar p{font-size: 0.85rem; color: #9ca3af; line-height: 1.4;}
+        .sidebar input[type="file"]{font-size: 0.8rem; color: #d1d5db;}
+        .sidebar button{padding: 10px;}
+
+        .chat-container{
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--chat-bg);
+            max-width: 990px;
+            margin: 0 auto;
+            border-left: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            min-width: 0;
+        }
+        .chat-header{
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-badge{
+            font-size: 0.75rem;
+            background: #def7ec;
+            color: #03543f;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-weight: 500;
+        }
+        .chat-messages{
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .message{
+            max-width: 80%;
+            padding: 12px 18px;
+            border-radius: 12px;
+            line-height: 1.5;
+            font-size: 0.95rem;
+            white-space: pre-wrap;
+        }
+        .user-message{
+            align-self: flex-end;
+            background-color: var(--user-bubble);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+        .bot-message{
+            align-self: flex-start;
+            background-color: var(--bot-bubble);
+            color: var(--text-dark);
+            border-bottom-left-radius: 2px;
+        }
+        .input-bar{
+            padding: 20px 40px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 12px;
+            background: var(--chat-bg);
+        }
+        input[type="text"]{
+            flex: 1;
+            padding: 14px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border 0.2s;
+        }
+        input[type="text"]:focus{border-color: var(--user-bubble);}
+        button{
+            padding: 0 24px;
+            background: var(--user-bubble);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover {opacity: 0.9;}
+        button:disabled {background: #9ca3af; cursor: not-allowed;}
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2>RAG Assistant</h2>
+        <p>Connected directly to your local ChromaDB vector store powered by Gemini.</p>
+        <input type="file" id="docFileInput" accept=".pdf,.txt">
+        <button id="docUploadBtn" onclick="uploadDocumentFile()">Upload &amp; Index</button>
+        <p id="docUploadStatus"></p>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-header">
+            <span>Knowledge Base Assistant</span>
+            <span class="status-badge">Online</span>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message bot-message">Hello! Ask me any question based on your indexed document.</div>
+        </div>
+
+        <div class="input-bar">
+            <input type="file" id="imageInput" accept="image/*" style="display: none;">
+            <button id="uploadBtn" onclick="document.getElementById('imageInput').click()" style="padding: 0 15px; background: #4a5568;">📷</button>
+            <span id="imagePreviewName" style="align-self: center; font-size: 0.8rem; color: #718096; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
+            <input type="text" id="userInput" placeholder="Ask a question..." autocomplete="off">
+            <button id="sendBtn" onclick="sendQuery()">Send</button>
+        </div>
+    </div>
+
+<script>
+    const chatMessages = document.getElementById("chatMessages");
+    const userInput = document.getElementById("userInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const imageInput = document.getElementById("imageInput");
+    const imagePreviewName = document.getElementById("imagePreviewName");
+
+    let currentImage = null; // data URL đầy đủ, giữ đúng mime type
+
+    imageInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            imagePreviewName.textContent = file.name;
+            const reader = new FileReader();
+            reader.onloadend = () => { currentImage = reader.result; };
+            reader.readAsDataURL(file);
+        } else {
+            imagePreviewName.textContent = "";
+            currentImage = null;
+        }
+    });
+
+    userInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !sendBtn.disabled) sendQuery();
+    });
+
+    function appendMessage(text, isUser = false) {
+        const msg = document.createElement("div");
+        msg.className = `message ${isUser ? "user-message" : "bot-message"}`;
+        msg.textContent = text;
+        chatMessages.appendChild(msg);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return msg;
+    }
+
+    async function sendQuery() {
+        const question = userInput.value.trim();
+        if (!question && !currentImage) return;
+
+        let displayMsg = question;
+        if (currentImage) displayMsg += (question ? "\n" : "") + "[Image attached]";
+        appendMessage(displayMsg, true);
+
+        userInput.value = "";
+        userInput.disabled = true;
+        sendBtn.disabled = true;
+
+        const tempBotMsg = appendMessage("Thinking...");
+
+        try {
+            const response = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    question: question || "Describe this image.",
+                    image_data: currentImage
+                })
+            });
+            if (!response.ok) throw new Error("Server error");
+            const data = await response.json();
+            tempBotMsg.textContent = data.answer;
+        } catch (err) {
+            tempBotMsg.textContent = "Error: Could not retrieve answer from the server.";
+        } finally {
+            userInput.disabled = false;
+            sendBtn.disabled = false;
+            imageInput.value = "";
+            imagePreviewName.textContent = "";
+            currentImage = null;
+            userInput.focus();
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    }
+
+    async function uploadDocumentFile() {
+        const fileInput = document.getElementById("docFileInput");
+        const statusText = document.getElementById("docUploadStatus");
+        const uploadBtn = document.getElementById("docUploadBtn");
+
+        if (!fileInput.files[0]) {
+            statusText.style.color = "#fca5a5";
+            statusText.textContent = "Please select a file first.";
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+
+        statusText.style.color = "#93c5fd";
+        statusText.textContent = "Processing and indexing...";
+        uploadBtn.disabled = true;
+
+        try {
+            const response = await fetch("/api/upload", {
+                method: "POST",
+                body: formData
+            });
+            const result = await response.json();
+            if (response.ok) {
+                statusText.style.color = "#86efac";
+                statusText.textContent = result.message;
+                fileInput.value = "";
+            } else {
+                statusText.style.color = "#fca5a5";
+                statusText.textContent = result.detail || "Upload failed.";
+            }
+        } catch (err) {
+            statusText.style.color = "#fca5a5";
+            statusText.textContent = "Error uploading document.";
+        } finally {
+            uploadBtn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
